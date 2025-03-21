@@ -2,11 +2,13 @@ import React, { createContext, useContext, useState, ReactNode, useEffect } from
 import { SalesData, DashboardStats } from '../types';
 import { analyzeSalesData } from '../utils/dataAnalysis';
 import { importExcelData } from '../utils/excelImport';
+import { db } from '../config/firebase';
+import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
 
-// Local Storage Keys
-const STORAGE_KEYS = {
-  SALES_DATA: 'turkcell_magaza_sales_data',
-  DASHBOARD_STATS: 'turkcell_magaza_dashboard_stats'
+// Collection names
+const COLLECTIONS = {
+  SALES_DATA: 'sales_data',
+  DASHBOARD_STATS: 'dashboard_stats'
 };
 
 interface DataContextType {
@@ -20,33 +22,58 @@ interface DataContextType {
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
+// Firebase için veriyi temizle
+const cleanDataForFirestore = (data: any) => {
+  const cleaned = { ...data };
+  
+  // undefined değerleri kaldır
+  Object.keys(cleaned).forEach(key => {
+    if (cleaned[key] === undefined) {
+      delete cleaned[key];
+    }
+  });
+
+  // Tarihleri string'e çevir
+  if (cleaned.tarih && cleaned.tarih instanceof Date) {
+    cleaned.tarih = cleaned.tarih.toISOString();
+  }
+
+  return cleaned;
+};
+
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // Initialize state from localStorage if available
-  const [salesData, setSalesData] = useState<SalesData[]>(() => {
-    const savedData = localStorage.getItem(STORAGE_KEYS.SALES_DATA);
-    return savedData ? JSON.parse(savedData) : [];
-  });
-
-  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(() => {
-    const savedStats = localStorage.getItem(STORAGE_KEYS.DASHBOARD_STATS);
-    return savedStats ? JSON.parse(savedStats) : null;
-  });
-
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [salesData, setSalesData] = useState<SalesData[]>([]);
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Save to localStorage whenever data changes
+  // Firebase'den verileri yükle
   useEffect(() => {
-    if (salesData.length > 0) {
-      localStorage.setItem(STORAGE_KEYS.SALES_DATA, JSON.stringify(salesData));
-    }
-  }, [salesData]);
+    const loadData = async () => {
+      try {
+        // Satış verilerini yükle
+        const salesSnapshot = await getDocs(collection(db, COLLECTIONS.SALES_DATA));
+        const salesDataFromDB: SalesData[] = [];
+        salesSnapshot.forEach((doc) => {
+          salesDataFromDB.push({ id: doc.id, ...doc.data() } as SalesData);
+        });
+        setSalesData(salesDataFromDB);
 
-  useEffect(() => {
-    if (dashboardStats) {
-      localStorage.setItem(STORAGE_KEYS.DASHBOARD_STATS, JSON.stringify(dashboardStats));
-    }
-  }, [dashboardStats]);
+        // Dashboard istatistiklerini yükle
+        const statsDoc = await getDocs(collection(db, COLLECTIONS.DASHBOARD_STATS));
+        if (!statsDoc.empty) {
+          setDashboardStats(statsDoc.docs[0].data() as DashboardStats);
+        }
+      } catch (err: any) {
+        console.error('Error loading data from Firebase:', err);
+        setError('Veriler yüklenirken bir hata oluştu: ' + err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
 
   const importData = async (file: File) => {
     setIsLoading(true);
@@ -59,9 +86,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (data.length === 0) {
         throw new Error('Excel dosyasından veri alınamadı. Lütfen dosya formatını kontrol edin.');
       }
+
+      // Önce mevcut verileri temizle
+      await clearData();
+
+      // Verileri Firebase'e kaydet
+      const batch = writeBatch(db);
+      
+      data.forEach((item, index) => {
+        const cleanedItem = cleanDataForFirestore(item);
+        const docRef = doc(collection(db, COLLECTIONS.SALES_DATA));
+        batch.set(docRef, { ...cleanedItem, id: docRef.id });
+      });
+
+      // Batch işlemini gerçekleştir
+      await batch.commit();
+      
+      // İstatistikleri hesapla ve kaydet
+      const stats = analyzeSalesData(data);
+      const statsRef = doc(collection(db, COLLECTIONS.DASHBOARD_STATS), 'current');
+      await setDoc(statsRef, cleanDataForFirestore(stats));
       
       setSalesData(data);
-      const stats = analyzeSalesData(data);
       setDashboardStats(stats);
     } catch (err: any) {
       console.error('Error importing data:', err);
@@ -71,13 +117,34 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const clearData = () => {
-    setSalesData([]);
-    setDashboardStats(null);
-    setError(null);
-    // Clear localStorage
-    localStorage.removeItem(STORAGE_KEYS.SALES_DATA);
-    localStorage.removeItem(STORAGE_KEYS.DASHBOARD_STATS);
+  const clearData = async () => {
+    setIsLoading(true);
+    try {
+      // Tüm satış verilerini sil
+      const salesSnapshot = await getDocs(collection(db, COLLECTIONS.SALES_DATA));
+      const batch = writeBatch(db);
+      
+      salesSnapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      // Dashboard istatistiklerini sil
+      const statsSnapshot = await getDocs(collection(db, COLLECTIONS.DASHBOARD_STATS));
+      statsSnapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      await batch.commit();
+
+      setSalesData([]);
+      setDashboardStats(null);
+      setError(null);
+    } catch (err: any) {
+      console.error('Error clearing data:', err);
+      setError('Veriler silinirken bir hata oluştu: ' + err.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

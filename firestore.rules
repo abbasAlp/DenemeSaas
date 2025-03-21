@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Tüm koleksiyonlara okuma ve yazma izni ver
+    match /{document=**} {
+      allow read, write: if true;
+    }
+    
+    // Satış verileri için özel kurallar
+    match /sales_data/{document} {
+      allow read, write: if true;
+    }
+    
+    // Dashboard istatistikleri için özel kurallar
+    match /dashboard_stats/{document} {
+      allow read, write: if true;
+    }
+  }
+} 
