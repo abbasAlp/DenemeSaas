@@ -96,9 +96,10 @@ const LoginPage: React.FC = () => {
         </form>
 
         <div className="mt-6 text-center text-sm text-gray-600">
-          <p>Demo Hesapları:</p>
-          <p>Admin: admin / admin123</p>
-          <p>Kullanıcı: user / user123</p>
+         
+          <p className='font-bold'>Proje: Abbas ALP</p>
+         
+          
         </div>
       </div>
     </div>

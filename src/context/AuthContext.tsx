@@ -5,14 +5,14 @@ import { User, AuthState, LoginCredentials } from '../types/auth';
 const MOCK_USERS: User[] = [
   {
     id: '1',
-    username: 'admin',
-    password: 'admin123', // Gerçek uygulamada şifreler hash'lenmiş olmalı
+    username: 'abbas',
+    password: '299100280', // Gerçek uygulamada şifreler hash'lenmiş olmalı
     role: 'admin'
   },
   {
     id: '2',
-    username: 'user',
-    password: 'user123',
+    username: 'okay',
+    password: 'okay5656',
     role: 'user'
   }
 ];
